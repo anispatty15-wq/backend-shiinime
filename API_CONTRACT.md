@@ -1,6 +1,6 @@
 # SHIINIME API Contract
 
-Base URL production: `https://api.example.com` (ubah sesuai deployment). Semua response memakai JSON.
+Base URL production: `https://shiinime.duckdns.org/`. Semua response memakai JSON.
 
 ## Envelope
 
@@ -52,6 +52,26 @@ Collection data contains normalized `items`, `schedule`, `pagination`, and `prov
 ```
 
 `server`, server ID, quality, stream resolution, format, MIME type, subtitle, audio, and type are `null` because the inspected provider did not provide them. URLs are passed through unchanged. The `providerData` property preserves the original object for forward compatibility.
+
+The episode response also includes `servers`. Each provider stream is represented as one server-compatible entry so the Android client can use one stable shape without knowing provider internals:
+
+```json
+{
+  "servers": [{
+    "id": "provider-1",
+    "name": "Main Stream",
+    "streams": [{
+      "url": "https://upbolt.to/e/example",
+      "type": null,
+      "mimeType": null,
+      "playable": false,
+      "error": "HTTP_403"
+    }]
+  }]
+}
+```
+
+`playable` is determined by a backend `HEAD` validation when possible. The backend only sets `type` to `hls`, `dash`, or `progressive` when the provider response or URL/content type supports that classification. `mimeType` is omitted when the provider does not return a usable content type. HTML player pages, JSON responses, HTTP errors, and validation timeouts are never reported as direct media. Existing `streams` and `downloads` fields remain for APK compatibility.
 
 ## Authenticated Endpoints
 

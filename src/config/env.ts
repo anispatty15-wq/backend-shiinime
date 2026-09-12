@@ -14,6 +14,7 @@ const envSchema = z.object({
   CACHE_SEARCH_TTL_MS: z.coerce.number().int().nonnegative().default(5 * 60 * 1000),
   CACHE_DETAIL_TTL_MS: z.coerce.number().int().nonnegative().default(5 * 60 * 1000),
   CACHE_EPISODE_TTL_MS: z.coerce.number().int().nonnegative().default(60 * 1000),
+  CACHE_MEDIA_VALIDATION_TTL_MS: z.coerce.number().int().nonnegative().default(60 * 1000),
   CACHE_MAX_ENTRIES: z.coerce.number().int().positive().default(500),
   CORS_ORIGIN: z.string().default('*'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),

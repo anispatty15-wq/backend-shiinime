@@ -1,4 +1,5 @@
-import { NormalizedAnime, NormalizedDownload, NormalizedEpisode, NormalizedStream, ProviderRecord, ProviderResponse } from '../types/provider.js';
+import { NormalizedAnime, NormalizedDownload, NormalizedEpisode, NormalizedServer, NormalizedStream, ProviderRecord, ProviderResponse } from '../types/provider.js';
+import type { MediaValidation } from './media.js';
 
 const record = (value: unknown): ProviderRecord => value && typeof value === 'object' ? value as ProviderRecord : {};
 const text = (value: unknown): string | null => typeof value === 'string' ? value : value == null ? null : String(value);
@@ -33,12 +34,14 @@ export function normalizeEpisode(item: unknown): NormalizedEpisode {
   return { title: text(source.title), slug: text(source.slug) ?? '', number: text(source.episode), releaseDate: text(source.release_date), url: text(source.url), providerData: source };
 }
 
-export function normalizeStream(item: unknown): NormalizedStream {
+export function normalizeStream(item: unknown, validation?: MediaValidation): NormalizedStream {
   const source = record(item);
   return {
     name: text(source.name), url: text(source.url), server: text(source.server), serverId: text(source.server_id ?? source.serverId),
     quality: text(source.quality), resolution: text(source.resolution), format: text(source.format), mimeType: text(source.mime_type ?? source.mimeType),
-    subtitle: text(source.subtitle), audio: text(source.audio), type: text(source.type), providerData: source
+    subtitle: text(source.subtitle), audio: text(source.audio), type: validation?.type ?? text(source.type),
+    ...(validation ? { playable: validation.playable, ...(validation.mimeType ? { mimeType: validation.mimeType } : {}), ...(validation.error ? { error: validation.error } : {}) } : {}),
+    providerData: source
   };
 }
 
@@ -47,11 +50,25 @@ export function normalizeDownload(item: unknown): NormalizedDownload {
   return { name: text(source.name), url: text(source.url), resolution: text(source.resolution), format: text(source.format), providerData: source };
 }
 
-export function normalizeEpisodeResponse(response: ProviderResponse) {
+export async function normalizeEpisodeResponse(response: ProviderResponse, validate?: (url: string) => Promise<MediaValidation>, requestedSlug?: string) {
   const source = record(response);
+  const rawStreams = Array.isArray(source.streams) ? source.streams : [];
+  const validationCache = new Map<string, Promise<MediaValidation>>();
+  const validations = validate ? await Promise.all(rawStreams.map(async (item) => {
+    const url = text(record(item).url);
+    if (!url) return { playable: false, error: 'STREAM_URL_MISSING' };
+    const existing = validationCache.get(url);
+    if (existing) return existing;
+    const validation = validate(url);
+    validationCache.set(url, validation);
+    return validation;
+  })) : [];
+  const streams = rawStreams.map((item, index) => normalizeStream(item, validate ? validations[index] : undefined));
+  const servers: NormalizedServer[] = streams.map((stream, index) => ({ id: stream.serverId ?? `provider-${index + 1}`, name: stream.server ?? stream.name, streams: [stream] }));
   return {
-    episode: normalizeEpisode({ slug: source.slug, title: source.episode_title, episode: source.episode, url: source.url }),
-    streams: Array.isArray(source.streams) ? source.streams.map(normalizeStream) : [],
+    episode: normalizeEpisode({ slug: source.slug ?? requestedSlug, title: source.episode_title, episode: source.episode, url: source.url }),
+    streams,
+    servers,
     downloads: Array.isArray(source.downloads) ? source.downloads.map(normalizeDownload) : [],
     providerData: source
   };

@@ -32,7 +32,8 @@ export function animeRoutes(service = new OploverzService()) {
   });
   app.get('/episode/:slug', async (request, reply) => {
     const params = slugSchema.parse(request.params);
-    return ok(reply, normalizeEpisodeResponse(await service.getEpisode(params.slug)));
+    const validate = typeof service.validateMediaUrl === 'function' ? service.validateMediaUrl.bind(service) : undefined;
+    return ok(reply, await normalizeEpisodeResponse(await service.getEpisode(params.slug), validate, params.slug));
   });
   };
 }

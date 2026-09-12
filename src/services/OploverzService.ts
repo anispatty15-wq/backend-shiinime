@@ -2,11 +2,14 @@ import axios, { AxiosInstance } from 'axios';
 import { env } from '../config/env.js';
 import { ProviderResponse } from '../types/provider.js';
 import { providerError } from '../utils/errors.js';
+import type { MediaValidation } from '../utils/media.js';
 
 export class OploverzService {
   private readonly client: AxiosInstance;
   private readonly cache = new Map<string, { expiresAt: number; value: ProviderResponse }>();
   private readonly pending = new Map<string, Promise<ProviderResponse>>();
+  private readonly mediaValidationCache = new Map<string, { expiresAt: number; value: MediaValidation }>();
+  private readonly pendingMediaValidation = new Map<string, Promise<MediaValidation>>();
 
   constructor(client?: AxiosInstance) {
     this.client = client ?? axios.create({
@@ -85,4 +88,39 @@ export class OploverzService {
   searchAnime(query: string, page?: number) { return this.get(`/search/${encodeURIComponent(query)}`, { page }); }
   getAnimeDetail(slug: string) { return this.get(`/anime/${encodeURIComponent(slug)}`); }
   getEpisode(slug: string) { return this.get(`/episode/${encodeURIComponent(slug)}`); }
+
+  async validateMediaUrl(url: string): Promise<MediaValidation> {
+    const cached = this.mediaValidationCache.get(url);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    this.mediaValidationCache.delete(url);
+    const running = this.pendingMediaValidation.get(url);
+    if (running) return running;
+    const validation = this.validateMediaUrlUncached(url).then((value) => {
+      if (env.CACHE_MEDIA_VALIDATION_TTL_MS > 0) this.mediaValidationCache.set(url, { value, expiresAt: Date.now() + env.CACHE_MEDIA_VALIDATION_TTL_MS });
+      return value;
+    }).finally(() => this.pendingMediaValidation.delete(url));
+    this.pendingMediaValidation.set(url, validation);
+    return validation;
+  }
+
+  private async validateMediaUrlUncached(url: string): Promise<MediaValidation> {
+    try {
+      const response = await this.client.head(url, { maxRedirects: 5, timeout: env.PROVIDER_TIMEOUT_MS });
+      const contentType = typeof response.headers['content-type'] === 'string' ? response.headers['content-type'].toLowerCase() : null;
+      const finalUrl = response.request?.res?.responseUrl ?? url;
+      const path = finalUrl.split('?')[0].toLowerCase();
+      const type = contentType?.includes('mpegurl') || path.endsWith('.m3u8') ? 'hls'
+        : contentType?.includes('dash+xml') || path.endsWith('.mpd') ? 'dash'
+          : contentType?.startsWith('video/') || path.endsWith('.mp4') ? 'progressive' : null;
+      if (response.status === 401 || response.status === 403) return { playable: false, error: `HTTP_${response.status}` };
+      if (response.status >= 400) return { playable: false, error: `HTTP_${response.status}` };
+      if (type) return { playable: true, type, mimeType: contentType };
+      if (contentType?.includes('text/html')) return { playable: false, error: 'HTML_PLAYER_PAGE', mimeType: contentType };
+      if (contentType?.includes('application/json')) return { playable: false, error: 'JSON_RESPONSE', mimeType: contentType };
+      return { playable: false, error: 'MEDIA_TYPE_UNKNOWN', mimeType: contentType };
+    } catch (error) {
+      if (axios.isAxiosError(error) && (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT')) return { playable: false, error: 'VALIDATION_TIMEOUT' };
+      return { playable: false, error: 'MEDIA_VALIDATION_FAILED' };
+    }
+  }
 }

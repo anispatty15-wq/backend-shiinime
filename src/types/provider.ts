@@ -42,7 +42,16 @@ export interface NormalizedStream {
   subtitle: string | null;
   audio: string | null;
   type: string | null;
+  playable?: boolean;
+  error?: string;
+  headers?: Record<string, string>;
   providerData: ProviderRecord;
+}
+
+export interface NormalizedServer {
+  id: string;
+  name: string | null;
+  streams: NormalizedStream[];
 }
 
 export interface NormalizedDownload {
